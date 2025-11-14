@@ -1,57 +1,88 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const studentSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Student name is required'],
+      required: [true, 'Name is required'],
       trim: true,
     },
     age: {
       type: Number,
       required: [true, 'Age is required'],
-      min: [5, 'Age must be at least 5'],
-      max: [100, 'Age must be less than 100'],
+      min: 5,
+      max: 100,
+    },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other'],
+      required: true,
     },
     phoneNumber: {
       type: String,
-      match: [/^[0-9]{10}$/, 'Please provide a valid phone number'],
-    },
-    parentPhone: {
-      type: String,
-      match: [/^[0-9]{10}$/, 'Please provide a valid phone number'],
+      required: [true, 'Phone number is required'],
+      unique: true,
     },
     email: {
       type: String,
+      required: [true, 'Email is required'],
+      unique: true,
       lowercase: true,
-      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
     },
     address: {
       type: String,
     },
-    profileImage: {
+    // Parent/Guardian Info
+    parentName: {
       type: String,
     },
-    enrollmentDate: {
+    parentPhone: {
+      type: String,
+    },
+    emergencyContact: {
+      type: String,
+    },
+    // Training Info
+    belt: {
+      type: String,
+      enum: ['beginner', 'intermediate', 'advanced', 'master'],
+      default: 'beginner',
+    },
+    joinDate: {
       type: Date,
       default: Date.now,
     },
     status: {
       type: String,
-      enum: ['active', 'inactive'],
+      enum: ['active', 'inactive', 'suspended'],
       default: 'active',
     },
-    belt: {
+    medicalInfo: {
       type: String,
-      enum: ['Beginner', 'Yellow Belt', 'Green Belt', 'Brown Belt', 'Black Belt'],
-      default: 'Beginner',
     },
-    achievements: [{
+    // Login Credentials
+    username: {
       type: String,
-    }],
-    faceEmbedding: {
-      type: [Number],
-      select: false,
+      required: [true, 'Username is required'],
+      unique: true,
+      trim: true,
+      minlength: 3,
+      maxlength: 20,
+    },
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: 6,
+      select: false, // Don't return password by default
+    },
+    // Face recognition
+    faceEnrolled: {
+      type: Boolean,
+      default: false,
+    },
+    lastAttendance: {
+      type: Date,
     },
   },
   {
@@ -59,9 +90,20 @@ const studentSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
-studentSchema.index({ name: 'text' });
-studentSchema.index({ status: 1 });
-studentSchema.index({ enrollmentDate: -1 });
+// Hash password before saving
+studentSchema.pre('save', async function (next) {
+  if (!this.isModified('password')) {
+    return next();
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Method to compare password
+studentSchema.methods.comparePassword = async function (candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
 
 module.exports = mongoose.model('Student', studentSchema);

@@ -1,141 +1,217 @@
-const Student = require('../models/Student');
 const User = require('../models/User');
+const Student = require('../models/Student');
+const { generateToken } = require('../config/jwt');
 const logger = require('../utils/logger');
 
-// @desc    Get all students
-// @route   GET /api/students
-// @access  Private
-exports.getStudents = async (req, res, next) => {
+// @desc    Login user/student
+// @route   POST /api/auth/login
+// @access  Public
+exports.login = async (req, res, next) => {
   try {
-    const { status, search } = req.query;
-    const query = {};
+    const { username, password } = req.body;
 
-    if (status) query.status = status;
-    if (search) query.name = { $regex: search, $options: 'i' };
-
-    const students = await Student.find(query).sort({ name: 1 });
-
-    res.status(200).json({
-      status: 'success',
-      count: students.length,
-      data: students,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Get single student
-// @route   GET /api/students/:id
-// @access  Private
-exports.getStudent = async (req, res, next) => {
-  try {
-    const student = await Student.findById(req.params.id);
-
-    if (!student) {
-      return res.status(404).json({
+    if (!username || !password) {
+      return res.status(400).json({
         status: 'error',
-        message: 'Student not found',
+        message: 'Please provide username and password',
       });
     }
 
+    // Try to find in User model first (Admin)
+    let user = await User.findOne({ username }).select('+password');
+    let isStudent = false;
+
+    // If not found in User, try Student model
+    if (!user) {
+      user = await Student.findOne({ username }).select('+password');
+      isStudent = true;
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Invalid credentials',
+      });
+    }
+
+    // Check password
+    const isPasswordMatch = await user.comparePassword(password);
+
+    if (!isPasswordMatch) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Invalid credentials',
+      });
+    }
+
+    // Check if student account is active
+    if (isStudent && user.status !== 'active') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Your account is inactive. Please contact administrator.',
+      });
+    }
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    // Prepare user data
+    const userData = {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      role: isStudent ? 'student' : user.role,
+    };
+
+    // If student, add student-specific data
+    if (isStudent) {
+      userData.studentId = user._id;
+      userData.name = user.name;
+      userData.belt = user.belt;
+    }
+
+    logger.info(`${isStudent ? 'Student' : 'User'} logged in: ${username}`);
+
     res.status(200).json({
       status: 'success',
-      data: student,
+      token,
+      user: userData,
     });
   } catch (error) {
+    logger.error('Login error:', error);
     next(error);
   }
 };
 
-// @desc    Create student
-// @route   POST /api/students
-// @access  Private (Admin)
-exports.createStudent = async (req, res, next) => {
+// @desc    Register user (Admin only, not for students)
+// @route   POST /api/auth/register
+// @access  Public (but should be removed in production)
+exports.register = async (req, res, next) => {
   try {
-    const student = await Student.create(req.body);
+    const { username, email, password, role } = req.body;
 
-    logger.info(`New student created: ${student.name} by ${req.user.username}`);
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Please provide all required fields',
+      });
+    }
+
+    // Only allow admin registration through this endpoint
+    if (role && role !== 'admin') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Student registration is not allowed through this endpoint',
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username }],
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User already exists',
+      });
+    }
+
+    // Create user
+    const user = await User.create({
+      username,
+      email,
+      password,
+      role: role || 'admin',
+    });
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    logger.info(`New user registered: ${username}`);
 
     res.status(201).json({
       status: 'success',
-      data: student,
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (error) {
+    logger.error('Registration error:', error);
     next(error);
   }
 };
 
-// @desc    Update student
-// @route   PUT /api/students/:id
-// @access  Private (Admin)
-exports.updateStudent = async (req, res, next) => {
-  try {
-    const student = await Student.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!student) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Student not found',
-      });
-    }
-
-    logger.info(`Student updated: ${student.name} by ${req.user.username}`);
-
-    res.status(200).json({
-      status: 'success',
-      data: student,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Delete student
-// @route   DELETE /api/students/:id
-// @access  Private (Admin)
-exports.deleteStudent = async (req, res, next) => {
-  try {
-    const student = await Student.findByIdAndDelete(req.params.id);
-
-    if (!student) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Student not found',
-      });
-    }
-
-    logger.info(`Student deleted: ${student.name} by ${req.user.username}`);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Student deleted successfully',
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Search students
-// @route   GET /api/students/search
+// @desc    Get current user
+// @route   GET /api/auth/me
 // @access  Private
-exports.searchStudents = async (req, res, next) => {
+exports.getMe = async (req, res, next) => {
   try {
-    const { q } = req.query;
+    // Try User model first
+    let user = await User.findById(req.user.id).select('-password');
 
-    const students = await Student.find({
-      $text: { $search: q },
-    }).limit(10);
+    // If not found, try Student model
+    if (!user) {
+      user = await Student.findById(req.user.id).select('-password');
+      
+      if (user) {
+        // Add student-specific data
+        return res.status(200).json({
+          status: 'success',
+          user: {
+            id: user._id,
+            username: user.username,
+            email: user.email,
+            role: 'student',
+            studentId: user._id,
+            name: user.name,
+            belt: user.belt,
+            status: user.status,
+          },
+        });
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found',
+      });
+    }
 
     res.status(200).json({
       status: 'success',
-      count: students.length,
-      data: students,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (error) {
+    logger.error('Get me error:', error);
+    next(error);
+  }
+};
+
+// @desc    Logout user
+// @route   POST /api/auth/logout
+// @access  Private
+exports.logout = async (req, res, next) => {
+  try {
+    logger.info(`User logged out: ${req.user.id}`);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
+    logger.error('Logout error:', error);
     next(error);
   }
 };
