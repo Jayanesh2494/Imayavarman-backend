@@ -1,217 +1,185 @@
-const User = require('../models/User');
 const Student = require('../models/Student');
-const { generateToken } = require('../config/jwt');
 const logger = require('../utils/logger');
 
-// @desc    Login user/student
-// @route   POST /api/auth/login
-// @access  Public
-exports.login = async (req, res, next) => {
+exports.getAllStudents = async (req, res, next) => {
   try {
-    const { username, password } = req.body;
+    const { status, search, limit = 50 } = req.query;
+    const query = {};
 
-    if (!username || !password) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Please provide username and password',
-      });
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phoneNumber: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
     }
 
-    // Try to find in User model first (Admin)
-    let user = await User.findOne({ username }).select('+password');
-    let isStudent = false;
-
-    // If not found in User, try Student model
-    if (!user) {
-      user = await Student.findOne({ username }).select('+password');
-      isStudent = true;
-    }
-
-    if (!user) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid credentials',
-      });
-    }
-
-    // Check password
-    const isPasswordMatch = await user.comparePassword(password);
-
-    if (!isPasswordMatch) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid credentials',
-      });
-    }
-
-    // Check if student account is active
-    if (isStudent && user.status !== 'active') {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Your account is inactive. Please contact administrator.',
-      });
-    }
-
-    // Generate token
-    const token = generateToken(user._id);
-
-    // Prepare user data
-    const userData = {
-      id: user._id,
-      username: user.username,
-      email: user.email,
-      role: isStudent ? 'student' : user.role,
-    };
-
-    // If student, add student-specific data
-    if (isStudent) {
-      userData.studentId = user._id;
-      userData.name = user.name;
-      userData.belt = user.belt;
-    }
-
-    logger.info(`${isStudent ? 'Student' : 'User'} logged in: ${username}`);
+    const students = await Student.find(query)
+      .select('-password')
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       status: 'success',
-      token,
-      user: userData,
+      results: students.length,
+      data: students,
     });
   } catch (error) {
-    logger.error('Login error:', error);
+    logger.error('Get students error:', error);
     next(error);
   }
 };
 
-// @desc    Register user (Admin only, not for students)
-// @route   POST /api/auth/register
-// @access  Public (but should be removed in production)
-exports.register = async (req, res, next) => {
+exports.getStudent = async (req, res, next) => {
   try {
-    const { username, email, password, role } = req.body;
+    const student = await Student.findById(req.params.id).select('-password');
 
-    // Validation
-    if (!username || !email || !password) {
+    if (!student) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Student not found',
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: student,
+    });
+  } catch (error) {
+    logger.error('Get student error:', error);
+    next(error);
+  }
+};
+
+exports.createStudent = async (req, res, next) => {
+  try {
+    const { name, age, gender, phoneNumber, email, address, parentName, parentPhone, emergencyContact, belt, medicalInfo, username, password } = req.body;
+
+    if (!name || !age || !gender || !phoneNumber || !email || !username || !password) {
       return res.status(400).json({
         status: 'error',
         message: 'Please provide all required fields',
       });
     }
 
-    // Only allow admin registration through this endpoint
-    if (role && role !== 'admin') {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Student registration is not allowed through this endpoint',
-      });
+    const existingUsername = await Student.findOne({ username });
+    if (existingUsername) {
+      return res.status(400).json({ status: 'error', message: 'Username already exists' });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { username }],
-    });
-
-    if (existingUser) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'User already exists',
-      });
+    const existingEmail = await Student.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({ status: 'error', message: 'Email already exists' });
     }
 
-    // Create user
-    const user = await User.create({
-      username,
-      email,
-      password,
-      role: role || 'admin',
+    const existingPhone = await Student.findOne({ phoneNumber });
+    if (existingPhone) {
+      return res.status(400).json({ status: 'error', message: 'Phone number already exists' });
+    }
+
+    const student = await Student.create({
+      name, age, gender, phoneNumber, email, address, parentName, parentPhone, emergencyContact,
+      belt: belt || 'beginner', medicalInfo, username, password,
     });
 
-    // Generate token
-    const token = generateToken(user._id);
+    const studentData = student.toObject();
+    delete studentData.password;
 
-    logger.info(`New user registered: ${username}`);
+    logger.info(`Student created: ${student.name}`);
 
     res.status(201).json({
       status: 'success',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
+      message: 'Student created successfully',
+      data: studentData,
     });
   } catch (error) {
-    logger.error('Registration error:', error);
+    logger.error('Create student error:', error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({ status: 'error', message: `${field} already exists` });
+    }
     next(error);
   }
 };
 
-// @desc    Get current user
-// @route   GET /api/auth/me
-// @access  Private
-exports.getMe = async (req, res, next) => {
+exports.updateStudent = async (req, res, next) => {
   try {
-    // Try User model first
-    let user = await User.findById(req.user.id).select('-password');
+    const { password, ...updateData } = req.body;
 
-    // If not found, try Student model
-    if (!user) {
-      user = await Student.findById(req.user.id).select('-password');
-      
-      if (user) {
-        // Add student-specific data
-        return res.status(200).json({
-          status: 'success',
-          user: {
-            id: user._id,
-            username: user.username,
-            email: user.email,
-            role: 'student',
-            studentId: user._id,
-            name: user.name,
-            belt: user.belt,
-            status: user.status,
-          },
-        });
-      }
+    if (password) {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password, salt);
     }
 
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found',
-      });
+    const student = await Student.findByIdAndUpdate(req.params.id, updateData, {
+      new: true,
+      runValidators: true,
+    }).select('-password');
+
+    if (!student) {
+      return res.status(404).json({ status: 'error', message: 'Student not found' });
     }
+
+    logger.info(`Student updated: ${student.name}`);
 
     res.status(200).json({
       status: 'success',
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
+      data: student,
     });
   } catch (error) {
-    logger.error('Get me error:', error);
+    logger.error('Update student error:', error);
     next(error);
   }
 };
 
-// @desc    Logout user
-// @route   POST /api/auth/logout
-// @access  Private
-exports.logout = async (req, res, next) => {
+exports.deleteStudent = async (req, res, next) => {
   try {
-    logger.info(`User logged out: ${req.user.id}`);
+    const student = await Student.findByIdAndDelete(req.params.id);
+
+    if (!student) {
+      return res.status(404).json({ status: 'error', message: 'Student not found' });
+    }
+
+    logger.info(`Student deleted: ${student.name}`);
 
     res.status(200).json({
       status: 'success',
-      message: 'Logged out successfully',
+      message: 'Student deleted successfully',
     });
   } catch (error) {
-    logger.error('Logout error:', error);
+    logger.error('Delete student error:', error);
+    next(error);
+  }
+};
+
+exports.searchStudents = async (req, res, next) => {
+  try {
+    const { q, status = 'active' } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ status: 'error', message: 'Search query required' });
+    }
+
+    const students = await Student.find({
+      status,
+      $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { phoneNumber: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+      ],
+    })
+      .select('-password')
+      .limit(20);
+
+    res.status(200).json({
+      status: 'success',
+      results: students.length,
+      data: students,
+    });
+  } catch (error) {
+    logger.error('Search students error:', error);
     next(error);
   }
 };

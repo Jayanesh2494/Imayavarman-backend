@@ -1,30 +1,19 @@
 const express = require('express');
-const {
-  getStudents,
-  getStudent,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-  searchStudents,
-} = require('../controllers/studentController');
-const { protect, authorize } = require('../middleware/auth');
-const { createStudentValidation } = require('../middleware/validation');
-
 const router = express.Router();
+const studentController = require('../controllers/studentController');
+const { protect, authorize } = require('../middleware/auth');
 
-router.use(protect); // All routes require authentication
+router.use(protect);
 
-router
-  .route('/')
-  .get(getStudents)
-  .post(authorize('admin'), createStudentValidation, createStudent);
+router.get('/search', studentController.searchStudents);
 
-router.get('/search', searchStudents);
+router.route('/')
+  .get(studentController.getAllStudents)
+  .post(authorize('admin'), studentController.createStudent);
 
-router
-  .route('/:id')
-  .get(getStudent)
-  .put(authorize('admin'), updateStudent)
-  .delete(authorize('admin'), deleteStudent);
+router.route('/:id')
+  .get(studentController.getStudent)
+  .put(authorize('admin'), studentController.updateStudent)
+  .delete(authorize('admin'), studentController.deleteStudent);
 
 module.exports = router;

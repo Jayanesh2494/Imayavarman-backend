@@ -1,33 +1,22 @@
 const express = require('express');
-const {
-  markAttendanceByFace,
-  markManualAttendance,
-  getTodayBatch,
-  getStudentAttendance,
-  getTodayAttendance,
-  getStats,
-  getHistory,
-  updateAttendance,
-  deleteAttendance,
-} = require('../controllers/attendanceController');
-const { protect, authorize } = require('../middleware/auth');
-const { markAttendanceValidation } = require('../middleware/validation');
-
 const router = express.Router();
 
-router.use(protect); // All routes require authentication
+// Import ALL functions explicitly
+const attendanceController = require('../controllers/attendanceController');
+const { protect, authorize } = require('../middleware/auth');
 
-router.post('/mark', authorize('admin'), markAttendanceValidation, markAttendanceByFace);
-router.post('/mark-manual', authorize('admin'), markManualAttendance);
-router.post('/today-batch', getTodayBatch);
-router.get('/student/:id', getStudentAttendance);
-router.get('/today', getTodayAttendance);
-router.get('/stats', getStats);
-router.get('/history', getHistory);
+// Apply auth to all routes
+router.use(protect);
 
-router
-  .route('/:id')
-  .patch(authorize('admin'), updateAttendance)
-  .delete(authorize('admin'), deleteAttendance);
+// Define routes explicitly
+router.post('/mark-face', authorize('admin'), attendanceController.markByFace);
+router.post('/mark-manual', authorize('admin'), attendanceController.markManualAttendance);
+router.post('/today-batch', attendanceController.getTodayBatch);
+router.get('/student/:id', attendanceController.getStudentAttendance);
+router.get('/today', attendanceController.getTodayAttendance);
+router.get('/stats', attendanceController.getStats);
+router.get('/history', attendanceController.getHistory);
+router.patch('/:id', authorize('admin'), attendanceController.updateAttendance);
+router.delete('/:id', authorize('admin'), attendanceController.deleteAttendance);
 
 module.exports = router;

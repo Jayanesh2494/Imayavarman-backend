@@ -1,8 +1,10 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { verifyToken } = require('../config/jwt');
+const Student = require('../models/Student');
+const logger = require('../utils/logger');
 
-const protect = async (req, res, next) => {
+// Protect routes
+exports.protect = async (req, res, next) => {
   try {
     let token;
 
@@ -18,46 +20,52 @@ const protect = async (req, res, next) => {
       });
     }
 
-    // Verify token
-    const decoded = verifyToken(token);
+    try {
+      // Verify token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (!decoded) {
+      // Try to find user in User model
+      let user = await User.findById(decoded.id).select('-password');
+
+      // If not found, try Student model
+      if (!user) {
+        user = await Student.findById(decoded.id).select('-password');
+      }
+
+      if (!user) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'User not found',
+        });
+      }
+
+      req.user = {
+        id: user._id,
+        role: user.role || 'student',
+      };
+
+      next();
+    } catch (error) {
       return res.status(401).json({
         status: 'error',
-        message: 'Invalid or expired token',
+        message: 'Not authorized to access this route',
       });
     }
-
-    // Get user from token
-    const user = await User.findById(decoded.id).select('-password');
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'User not found or inactive',
-      });
-    }
-
-    req.user = user;
-    next();
   } catch (error) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Not authorized to access this route',
-    });
+    logger.error('Protect middleware error:', error);
+    next(error);
   }
 };
 
-const authorize = (...roles) => {
+// Authorize specific roles
+exports.authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         status: 'error',
-        message: `Role ${req.user.role} is not authorized to access this route`,
+        message: `User role '${req.user.role}' is not authorized to access this route`,
       });
     }
     next();
   };
 };
-
-module.exports = { protect, authorize };
