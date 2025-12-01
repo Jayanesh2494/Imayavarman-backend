@@ -5,7 +5,7 @@ const connectDB = require('./src/config/database');
 const PORT = process.env.PORT || 3000;
 
 console.log('🚀 Starting Silambam Training Centre Server...');
-console.log('📍 Environment:', process.env.NODE_ENV || 'development');
+console.log('📍 Environment:', process.env.NODE_ENV || 'production');
 console.log('📍 Port:', PORT);
 
 // Connect to MongoDB
